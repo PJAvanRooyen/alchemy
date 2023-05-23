@@ -2,65 +2,121 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using System.Linq;
+using System.Diagnostics;
 
 public class LineProperties
 {
     public List<Vector3> pointsList = new List<Vector3>();
-    public List<int> directionChangeIndices = new List<int>();
+    public List<int> edgeIndices = new List<int>();
 
     public void Clear()
     {
         pointsList.Clear();
-        directionChangeIndices.Clear();
+        edgeIndices.Clear();
     }
 }
 
 public class LineQuantifier : MonoBehaviour
 {
     public bool debug = true;
-    public string targetTag = "Line";
-    public Text linesText;
+    public string lineTag = "Line";
+
+    [Range(0f, 0.1f)]
+    public float lineSimplifyTolerance = 0.05f;
+
+    [Range(0f, 1f)]
+    public float lineEdgeTolerance = 0.4f;
+
+    [Range(0f, 0.5f)]
+    public float isSolidTolerance = 0.3f;
+
+    public Text debugText;
+
+    private List<LineProperties> linePropertiesList = new List<LineProperties>();
 
     private void Start()
     {
-        Quantify();
     }
 
+    public void QuantifyLine(ref GameObject line){
+        LineProperties lineProperties =  new LineProperties();
 
-    public void Quantify(){
-        GameObject[] targetObjects = GameObject.FindGameObjectsWithTag(targetTag);
+        LineRenderer renderer = line.GetComponent<LineRenderer>();
+        SetPoints(ref lineProperties, ref renderer);
+        SetEdgeIndices(ref lineProperties, ref renderer);
+
+        linePropertiesList.Add(lineProperties);
     }
 
-    private void CheckDirectionChange()
+    private void SetPoints(ref LineProperties lineProperties, ref LineRenderer renderer)
     {
-        // Check if there is a change in x or y direction
-        // int pointCount = lineProperties.pointsList.Count;
-        // if (pointCount > 1){
-        //     Vector3 point = lineProperties.pointsList[pointCount - 1];
-        //     Vector3 previousPoint = lineProperties.pointsList[pointCount - 2];
-        //     Vector3 direction = point - previousPoint;
+        lineProperties.pointsList = GetSimplifiedPoints(ref renderer, lineSimplifyTolerance);
+    }
 
-        //     if (Mathf.Sign(direction.x) != Mathf.Sign(previousPoint.x) ||
-        //         Mathf.Sign(direction.y) != Mathf.Sign(previousPoint.y)){
-        //         lineProperties.directionChangeIndices.Add(pointCount - 2);
-        //     }
-        // }
+    private void SetEdgeIndices(ref LineProperties lineProperties, ref LineRenderer renderer)
+    {
+        List<Vector3> pointsList = lineProperties.pointsList;
+        List<Vector3> edges = GetSimplifiedPoints(ref renderer, lineEdgeTolerance);
+
+        List<int> edgeIndices = lineProperties.edgeIndices;
+        foreach(Vector3 edge in edges){
+            int index = pointsList.IndexOf(edge);
+            System.Diagnostics.Debug.Assert(index != -1);
+            edgeIndices.Add(index);     
+        }
+
+        if(formsSolid(ref renderer, isSolidTolerance)){
+            edgeIndices.Add(0); 
+        }
+    }
+
+    private List<Vector3> GetSimplifiedPoints(ref LineRenderer renderer, float tolerance)
+    {
+        Vector3[] positions = new Vector3[renderer.positionCount];
+        renderer.GetPositions(positions);
+
+        renderer.Simplify(tolerance);
+
+        Vector3[] positionsSimplified = new Vector3[renderer.positionCount];
+        renderer.GetPositions(positionsSimplified);
+
+        // Reset the renderer
+        renderer.positionCount = positions.Length;
+        renderer.SetPositions(positions);
+
+        return positionsSimplified.ToList();
+    }
+
+    private bool formsSolid(ref LineRenderer renderer, float tolerance)
+    {
+        Vector3 firstPos = renderer.GetPosition(0);
+        Vector3 lastPos = renderer.GetPosition(renderer.positionCount - 1);
+        return Vector3.Distance(firstPos, lastPos) < tolerance;
     }
 
     void OnGUI()
     {
         if (debug){
-            GameObject[] targetObjects = GameObject.FindGameObjectsWithTag(targetTag);
-            int count = targetObjects.Length;
-            linesText.text = string.Format("Lines:\nCount: {0}\n", count.ToString());
+            int count = linePropertiesList.Count;
+            debugText.text = string.Format("Lines:\nCount: {0}\n", count.ToString());
 
             int idx = 0;
-            foreach (GameObject obj in targetObjects){
-                LineRenderer renderer = obj.GetComponent<LineRenderer>();
-                int edgeCount = renderer.positionCount - 2;
-                linesText.text += string.Format("Line[{0}]: EdgeCount: {1}\n", idx, edgeCount);
+            foreach (LineProperties lineProperties in linePropertiesList){
+                int posCount = lineProperties.pointsList.Count;
+                int edgeCount = lineProperties.edgeIndices.Count - 2;
+                debugText.text += string.Format("Line[{0}]: PosCount: {1}, EdgeCount: {2}\n", idx, posCount, edgeCount);
                 idx++;
             }
+        }
+    }
+
+    public void Clear()
+    {
+        linePropertiesList.Clear();
+
+        if (debug){
+            debugText.text = "";
         }
     }
 }

@@ -6,13 +6,8 @@ public class LineDrawer : MonoBehaviour
     public GameObject linePrefab;
     public string lineTag = "Line";
 
-    [Range(0f, 0.1f)]
-    public float lineSimplifyTolerance = 0.05f;
-
-    [Range(0f, 1f)]
-    public float lineEdgeTolerance = 0.4f;
-
     private LineQuantifier lineQuantifier;
+    private GameObject currentLine;
     private LineRenderer currentRenderer;
 
     void Start()
@@ -24,19 +19,17 @@ public class LineDrawer : MonoBehaviour
     {
         if (Input.GetMouseButtonDown(1))
         {
-            GameObject[] targetObjects = GameObject.FindGameObjectsWithTag(lineTag);
-            foreach (GameObject obj in targetObjects){
-                obj.SetActive(false);
-            }
+            Clear();
+            lineQuantifier.Clear();
         }
 
 
         if (Input.GetMouseButtonDown(0))
         {
             // Instantiate a new LineRenderer for the new line
-            GameObject newLine = Instantiate(linePrefab, Vector3.zero, Quaternion.identity);
-            newLine.tag = lineTag;
-            currentRenderer = newLine.GetComponent<LineRenderer>();
+            currentLine = Instantiate(linePrefab, Vector3.zero, Quaternion.identity);
+            currentLine.tag = lineTag;
+            currentRenderer = currentLine.GetComponent<LineRenderer>();
             currentRenderer.positionCount = 0;
         }
 
@@ -54,8 +47,15 @@ public class LineDrawer : MonoBehaviour
 
         if (Input.GetMouseButtonUp(0))
         {
-            currentRenderer.Simplify(lineSimplifyTolerance);
-            lineQuantifier.Quantify();
+            lineQuantifier.QuantifyLine(ref currentLine);
+        }
+    }
+
+    void Clear()
+    {
+        GameObject[] targetObjects = GameObject.FindGameObjectsWithTag(lineTag);
+        foreach (GameObject obj in targetObjects){
+            Destroy(obj);
         }
     }
 }
