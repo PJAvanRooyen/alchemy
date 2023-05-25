@@ -60,7 +60,7 @@ public class LineProperties
     }
 
     public List<Vector3> pointsList = new List<Vector3>();
-    public List<int> edgeIndices = new List<int>();
+    public List<int> vertexIndices = new List<int>();
     public List<Intersection> intersections = new List<Intersection>();
     public Shape shape = Shape.Other;
     public ShapeType shapeType = ShapeType.Other;
@@ -68,7 +68,7 @@ public class LineProperties
     public void Clear()
     {
         pointsList.Clear();
-        edgeIndices.Clear();
+        vertexIndices.Clear();
         shape = Shape.Other;
         shapeType = ShapeType.Other;
     }
@@ -88,6 +88,9 @@ public class LineQuantifier : MonoBehaviour
     [Range(0f, 0.5f)]
     public float isSolidTolerance = 0.3f;
 
+    [Range(0f, 90f)]
+    public float edgeAngleTolerance = 15f;
+
     public Text debugText;
 
     private List<LineProperties> linePropertiesList = new List<LineProperties>();
@@ -101,7 +104,7 @@ public class LineQuantifier : MonoBehaviour
 
         LineRenderer renderer = line.GetComponent<LineRenderer>();
         SetPoints(ref lineProperties, ref renderer);
-        SetEdgeIndices(ref lineProperties, ref renderer);
+        SetVertexIndices(ref lineProperties, ref renderer);
         SetLineIntersections(ref lineProperties, ref renderer);
         SetShape(ref lineProperties, ref renderer);
         SetShapeType(ref lineProperties, ref renderer);
@@ -140,6 +143,23 @@ public class LineQuantifier : MonoBehaviour
         Vector3 firstPos = renderer.GetPosition(0);
         Vector3 lastPos = renderer.GetPosition(renderer.positionCount - 1);
         return Vector3.Distance(firstPos, lastPos) < tolerance;
+    }
+
+    private float Angle(Vector3 point1, Vector3 centerPoint, Vector3 point3)
+    {
+        Vector3 vector1 = point1 - centerPoint;
+        Vector3 vector2 = point3 - centerPoint;
+
+        float dotProduct = Vector3.Dot(vector1.normalized, vector2.normalized);
+        float angle = Mathf.Acos(dotProduct) * Mathf.Rad2Deg;
+
+        return angle;
+    }
+
+    private bool FormsEdge(Vector3 point1, Vector3 centerPoint, Vector3 point3)
+    {
+        float angle = Angle(point1, centerPoint, point3);
+        return !(angle <= 180f + edgeAngleTolerance && angle >= 180f - edgeAngleTolerance);
     }
 
     private bool LinesIntersect(Vector3 a1, Vector3 a2, Vector3 b1, Vector3 b2)
@@ -186,11 +206,11 @@ public class LineQuantifier : MonoBehaviour
             int idx = 0;
             foreach (LineProperties lineProperties in linePropertiesList){
                 int posCount = lineProperties.pointsList.Count;
-                int edgeCount = lineProperties.edgeIndices.Count;
+                int vertexCount = lineProperties.vertexIndices.Count;
                 int intersectionCount = lineProperties.intersections.Count;
                 LineProperties.Shape shape = lineProperties.shape;
                 LineProperties.ShapeType shapeType = lineProperties.shapeType;
-                debugText.text += string.Format("Line[{0}]: ShapeType {5}, Shape: {4}, PosCount: {1}, EdgeCount: {2}, IntersectionCount: {3}\n", idx, posCount, edgeCount, intersectionCount, shape, shapeType);
+                debugText.text += string.Format("Shape: {4} {3}, PosCount: {0}, VertexCount: {1}, IntersectionCount: {2}\n", posCount, vertexCount, intersectionCount, shape, shapeType);
                 idx++;
             }
         }
@@ -203,25 +223,37 @@ public class LineQuantifier : MonoBehaviour
     }
 
     //! NOTE: this method depends on the lineProperties pointsList.
-    private void SetEdgeIndices(ref LineProperties lineProperties, ref LineRenderer renderer)
+    private void SetVertexIndices(ref LineProperties lineProperties, ref LineRenderer renderer)
     {
         List<Vector3> pointsList = lineProperties.pointsList;
-        List<Vector3> edges = GetSimplifiedPoints(ref renderer, lineEdgeTolerance);
+        List<Vector3> vertices = GetSimplifiedPoints(ref renderer, lineEdgeTolerance);
 
-        List<int> edgeIndices = lineProperties.edgeIndices;
-        edgeIndices.Clear();
+        List<int> vertexIndices = lineProperties.vertexIndices;
+        vertexIndices.Clear();
+
+        if(vertices.Count < 2){
+            return;
+        }
 
         // NOTE: don't include line start and end as edges.
-        for(int edgeIdx = 1; edgeIdx < edges.Count - 1; edgeIdx++){
-            Vector3 edge = edges[edgeIdx];
-            int index = pointsList.IndexOf(edge);
+        for(int edgeIdx = 1; edgeIdx < vertices.Count - 1; edgeIdx++){
+            Vector3 vertex = vertices[edgeIdx];
+            int index = pointsList.IndexOf(vertex);
             System.Diagnostics.Debug.Assert(index != -1);
-            edgeIndices.Add(index);     
+            vertexIndices.Add(index);     
         }
 
         if(FormsSolid(ref renderer, isSolidTolerance)){
-            //pointsList[pointsList.Count - 1] = pointsList[0];
-            edgeIndices.Insert(0, 0);
+            Vector3 point1 = vertices[1];
+            Vector3 centerPoint = vertices[0];
+            Vector3 point3 = vertices[vertices.Count - 2];
+
+            if(FormsEdge(point1, centerPoint, point3)){
+                vertexIndices.Insert(0, 0);
+            }
+        }else{
+            vertexIndices.Insert(0, 0);
+            vertexIndices.Add(pointsList.Count - 1);
         }
     }
 
@@ -232,22 +264,18 @@ public class LineQuantifier : MonoBehaviour
         intersections.Clear();
 
         List<Vector3> points = lineProperties.pointsList;
-        List<int> edgeIndices = lineProperties.edgeIndices;
-        int pointCount = edgeIndices.Count;
+        List<int> vertexIndices = lineProperties.vertexIndices;
+        int pointCount = vertexIndices.Count;
 
         if(pointCount < 2){
             return;
         }
 
         // Add the start and end of the line as vertices.
-        List<int> vertices = new List<int>(edgeIndices);
+        List<int> extendedVertexIndices = new List<int>(vertexIndices);
         if(FormsSolid(ref renderer, isSolidTolerance)){
-            vertices.Add(0);  
+            extendedVertexIndices.Add(0);  
             pointCount += 1;
-        }else{
-            vertices.Insert(0, 0);
-            vertices.Add(points.Count - 1);  
-            pointCount += 2;
         }
 
         if(pointCount < 4){
@@ -256,9 +284,9 @@ public class LineQuantifier : MonoBehaviour
         
         // Iterate over each pair of adjacent points
         for (int i = 0; i < pointCount - 1; i++){
-            int p1_idx = vertices[i];
+            int p1_idx = extendedVertexIndices[i];
             Vector3 p1 = points[p1_idx];
-            int p2_idx = vertices[i + 1];
+            int p2_idx = extendedVertexIndices[i + 1];
             Vector3 p2 = points[p2_idx];
 
             // Check this line against all other lines
@@ -268,9 +296,9 @@ public class LineQuantifier : MonoBehaviour
                     continue;
                 }
 
-                int p3_idx = vertices[j];
+                int p3_idx = extendedVertexIndices[j];
                 Vector3 p3 = points[p3_idx];
-                int p4_idx = vertices[j + 1];
+                int p4_idx = extendedVertexIndices[j + 1];
                 Vector3 p4 = points[p4_idx];
 
                 // Check if the two lines intersect
@@ -287,7 +315,17 @@ public class LineQuantifier : MonoBehaviour
                     intersection.line1 = subLine1;
                     intersection.line2 = subLine2;
 
-                    intersections.Add(intersection);
+                    bool alreadyAdded = false;
+                    foreach(LineProperties.Intersection intersect in intersections){
+                        if((intersect.line2.start == intersection.line1.start && intersect.line2.end == intersection.line1.end)
+                        && intersect.line1.start == intersection.line2.start && intersect.line1.end == intersection.line2.end){
+                            alreadyAdded = true;
+                            break;
+                        }
+                    }
+                    if(!alreadyAdded){
+                        intersections.Add(intersection);
+                    }
                 }
             }
         }
@@ -314,38 +352,40 @@ public class LineQuantifier : MonoBehaviour
     //! NOTE: this method depends on the lineProperties edge count and intersections.
     private void SetShapeType(ref LineProperties lineProperties, ref LineRenderer renderer)
     {
-        int edgeCount = lineProperties.edgeIndices.Count;
+        int vertexCount = lineProperties.vertexIndices.Count;
         int intersectionCount = lineProperties.intersections.Count;
 
         if(FormsSolid(ref renderer, isSolidTolerance)){
             if(intersectionCount== 0){
-                if(edgeCount == 3){
+                if(vertexCount == 3){
                     lineProperties.shapeType = LineProperties.ShapeType.Triangle;
-                }else if(edgeCount == 4){
+                }else if(vertexCount == 4){
                     lineProperties.shapeType = LineProperties.ShapeType.Square;   
-                }else if(edgeCount == 5){
+                }else if(vertexCount == 5){
                     lineProperties.shapeType = LineProperties.ShapeType.Pentagon;   
-                }else if(edgeCount == 6){
+                }else if(vertexCount == 6){
                     lineProperties.shapeType = LineProperties.ShapeType.Hexagon;   
-                }else if(edgeCount == 7){
+                }else if(vertexCount == 7){
                     lineProperties.shapeType = LineProperties.ShapeType.Heptagon;   
-                }else if(edgeCount == 8){
+                }else if(vertexCount == 8){
                     lineProperties.shapeType = LineProperties.ShapeType.Octagon;   
-                }else if(edgeCount > 8){
+                }else if(vertexCount > 8){
                     lineProperties.shapeType = LineProperties.ShapeType.Circle;   
                 }else{
                     lineProperties.shapeType = LineProperties.ShapeType.OtherSolid; 
                 }
             }else{
-                if(edgeCount == 4){
-                    lineProperties.shapeType = LineProperties.ShapeType.Triangle;
+                if(vertexCount >= 4){
+                    if(intersectionCount == 1){
+                        lineProperties.shapeType = LineProperties.ShapeType.Infinity;
+                    }
                 }else{
                     lineProperties.shapeType = LineProperties.ShapeType.OtherIntersectingSolid;
                 }
             }
         }else{
             if(intersectionCount == 0){
-                if(edgeCount == 0){
+                if(vertexCount == 2){
                     lineProperties.shapeType = LineProperties.ShapeType.Straight;
                 }else{
                     lineProperties.shapeType = LineProperties.ShapeType.ZigZag;
