@@ -156,6 +156,7 @@ MonoBehaviour:
   lineTag: Line
   lineSimplifyTolerance: 0.05
   lineEdgeTolerance: 0.4
+  isSolidTolerance: 0.3
   debugText: {fileID: 792664608}
 --- !u!4 &505720912
 Transform:
